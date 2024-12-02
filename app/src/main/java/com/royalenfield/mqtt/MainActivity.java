@@ -1,5 +1,8 @@
 package com.royalenfield.mqtt;
 
+import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.os.Bundle;
 import android.util.Log;
 import android.widget.Button;
@@ -23,6 +26,13 @@ public class MainActivity extends AppCompatActivity {
     String TAG = "Main Activity";
 
     /*
+    String user_name = "pd2admin";
+    String password = "pd2admin@";
+    String topic = "pd/vehicle/data";
+
+    String broker = "tcp://i7e1598e.ala.dedicated.gcp.emqxcloud.com:1883";
+    String clientId = "poc_pd2admin";
+     */
 
     String user_name = "reos_test";
     String password = "123456789";
@@ -30,21 +40,14 @@ public class MainActivity extends AppCompatActivity {
 
     String broker = "tcp://wa81da6a.ala.dedicated.aws.emqxcloud.com:1883";
     String clientId = "reos_123";
-     */
 
-    String user_name = "pd2admin";
-    String password = "pd2admin@";
-    String topic = "pd/vehicle/data";
-
-    String broker = "tcp://i7e1598e.ala.dedicated.gcp.emqxcloud.com:1883";
-    String clientId = "poc_pd2admin";
-
-    char[] sample_data = new char[] { 0xA5, 0xA5, //start of the frame
-            0x0D, 0x01, // size and sending device id
-            0, 0, 0x03, 0x61, // can id
-            0xB8, 0x02, 0, 0, 0x41, 0, 0, 0, // payload data
-            0, //checksum
-            0x5A, 0x5A // end of the frame
+    char[] sample_data = new char[] {
+            0xA5, 0xA5,                         // start of the frame
+            0x0D, 0x01,                         // size and sending device id
+            0, 0, 0x03, 0x61,                   // can id
+            0xB8, 0x02, 0, 0, 0x41, 0, 0, 0,    // payload data
+            0,                                  // checksum
+            0x5A, 0x5A                          // end of the frame.
     };
 
     int qos = 2;
@@ -69,42 +72,69 @@ public class MainActivity extends AppCompatActivity {
 
         send_data = findViewById(R.id.send_data);
         send_data.setOnClickListener(v -> {
-            sendData(sample_data);
+            new Thread(() -> {
+                int count = 0;
+                while (count != 100) {
+                    try {
+                        sendData(sample_data);
+                        Thread.sleep(5000);
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+                    count++;
+                }
+            }).start();
         });
     }
 
     private void createConnection() {
-        try {
-            sampleClient = new MqttClient(broker, clientId, persistence);
-            Log.d(TAG, "Connecting to broker: "+broker);
-            sampleClient.connect(connOpts);
-            Log.d(TAG, "Connected");
+        new Thread(() -> {
 
-            sampleClient.setCallback(new MqttCallback() {
-                @Override
-                public void connectionLost(Throwable cause) {
-                    Log.d(TAG, "Connection lost "+cause.getMessage());
-                    try {
-                        sampleClient.reconnect();
-                        Log.d(TAG, "Reconnected");
-                    } catch (MqttException e) {
-                        Log.d("Reconnection error", e.getMessage());
+            try {
+                sampleClient = new MqttClient(broker, clientId, persistence);
+                Log.d(TAG, "Connecting to broker: "+broker);
+
+                while (!sampleClient.isConnected()) {
+                    Log.d(TAG, "Trying to connect");
+                    if(isNetworkAvailable()) {
+                        sampleClient.connect(connOpts);
+                        Log.d(TAG, "Connecting");
+                    } else {
+                        Log.d(TAG, "No Internet");
                     }
+                    Thread.sleep(1000);
                 }
 
-                @Override
-                public void messageArrived(String topic, MqttMessage message) {
-                    Log.d(TAG, "Receive message: "+message.toString()+" from topic: "+topic);
-                }
+                Log.d(TAG, "Connected");
 
-                @Override
-                public void deliveryComplete(IMqttDeliveryToken token) {
-                    Log.d(TAG, "Delivery Complete");
-                }
-            });
-        } catch (MqttException me) {
-            printException(me);
-        }
+                sampleClient.setCallback(new MqttCallback() {
+                    @Override
+                    public void connectionLost(Throwable cause) {
+                        Log.d(TAG, "Connection lost "+cause.getMessage());
+                        try {
+                            sampleClient.reconnect();
+                            Log.d(TAG, "Reconnected");
+                        } catch (MqttException e) {
+                            Log.d("Reconnection error", e.getMessage());
+                        }
+                    }
+
+                    @Override
+                    public void messageArrived(String topic, MqttMessage message) {
+                        Log.d(TAG, "Receive message: "+message.toString()+" from topic: "+topic);
+                    }
+
+                    @Override
+                    public void deliveryComplete(IMqttDeliveryToken token) {
+                        Log.d(TAG, "Delivery Complete");
+                    }
+                });
+            } catch (MqttException me) {
+                printException(me);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }).start();
     }
 
     private void sendData(char[] charArray) {
@@ -153,5 +183,12 @@ public class MainActivity extends AppCompatActivity {
         Log.d(TAG, "cause "+me.getCause());
         Log.d(TAG, "excep "+me);
         me.printStackTrace();
+    }
+
+    private boolean isNetworkAvailable() {
+        ConnectivityManager connectivityManager
+                = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        NetworkInfo activeNetworkInfo = connectivityManager != null ? connectivityManager.getActiveNetworkInfo() : null;
+        return activeNetworkInfo != null && activeNetworkInfo.isConnected();
     }
 }
